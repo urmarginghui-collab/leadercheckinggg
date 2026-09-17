@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Leader Checking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --bg:#F6F7F9;
+    --surface:#FFFFFF;
+    --surface-2:#F0F2F5;
+    --border:#E4E7EC;
+    --ink:#171A21;
+    --ink-dim:#5B6472;
+    --ink-faint:#8991A0;
+    --accent:#2E6F52;
+    --accent-ink:#FFFFFF;
+    --accent-soft:#E4F1EA;
+    --accent-soft-ink:#215C42;
+    --done:#1F8A55;
+    --done-bg:#E7F6ED;
+    --done-border:#BEE6CE;
+    --pending:#B4700F;
+    --pending-bg:#FCF2DF;
+    --pending-border:#F2DBA9;
+    --issue:#C23B2C;
+    --issue-bg:#FCEAE7;
+    --issue-border:#F3C6BC;
+    --radius-lg:16px;
+    --radius-md:12px;
+    --radius-sm:8px;
+    --shadow-sm: 0 1px 2px rgba(23,26,33,0.04);
+    --shadow-md: 0 4px 16px rgba(23,26,33,0.06);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#15171B;
+      --surface:#1D2025;
+      --surface-2:#24272D;
+      --border:#31353C;
+      --ink:#EDEFF2;
+      --ink-dim:#A6ADB8;
+      --ink-faint:#767E8A;
+      --accent:#4E9C7B;
+      --accent-ink:#0D1512;
+      --accent-soft:#1E3129;
+      --accent-soft-ink:#7FCBA8;
+      --done:#3FB37B;
+      --done-bg:#16281F;
+      --done-border:#245939;
+      --pending:#E0A73F;
+      --pending-bg:#2B2314;
+      --pending-border:#5A4620;
+      --issue:#E5695A;
+      --issue-bg:#2E1917;
+      --issue-border:#5C2C25;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+      --shadow-md: 0 4px 20px rgba(0,0,0,0.4);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#15171B;
+    --surface:#1D2025;
+    --surface-2:#24272D;
+    --border:#31353C;
+    --ink:#EDEFF2;
+    --ink-dim:#A6ADB8;
+    --ink-faint:#767E8A;
+    --accent:#4E9C7B;
+    --accent-ink:#0D1512;
+    --accent-soft:#1E3129;
+    --accent-soft-ink:#7FCBA8;
+    --done:#3FB37B;
+    --done-bg:#16281F;
+    --done-border:#245939;
+    --pending:#E0A73F;
+    --pending-bg:#2B2314;
+    --pending-border:#5A4620;
+    --issue:#E5695A;
+    --issue-bg:#2E1917;
+    --issue-border:#5C2C25;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 20px rgba(0,0,0,0.4);
+    color-scheme: dark;
+  }
+
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+    font-size:14px; line-height:1.55;
+    padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
+  }
+  h1,h2,h3,.head-font{ font-family:'Plus Jakarta Sans',system-ui,sans-serif; }
+  .num{ font-variant-numeric: tabular-nums; }
+  button{ font-family:inherit; }
+  input,select,textarea{ font-family:inherit; font-size:14px; color:var(--ink); }
+
+  /* ---------- gate ---------- */
+  .gate-screen{ position:fixed; inset:0; z-index:50; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:20px; }
+  .gate-card{ max-width:340px; width:100%; text-align:center; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:32px 24px; box-shadow:var(--shadow-md); }
+  .gate-mark{ width:44px; height:44px; border-radius:12px; background:var(--accent); color:var(--accent-ink); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; margin:0 auto 14px; font-family:'Plus Jakarta Sans',sans-serif; }
+  .gate-card h1{ margin:0 0 6px; font-size:18px; }
+  .gate-card p{ margin:0 0 14px; font-size:12.5px; color:var(--ink-dim); }
+  .gate-card input{ width:100%; border:1px solid var(--border); border-radius:9px; padding:10px 12px; text-align:center; letter-spacing:0.08em; }
+
+  /* ---------- top nav ---------- */
+  .topbar{
+    position:sticky; top:env(safe-area-inset-top,0px); z-index:20;
+    background:var(--surface); border-bottom:1px solid var(--border);
+    padding:12px 16px calc(12px + env(safe-area-inset-top,0px)) 16px;
+    padding-top: max(12px, env(safe-area-inset-top,0px));
+  }
+  .topbar-inner{ max-width:1080px; margin:0 auto; }
+  .brand-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand-mark{ width:34px; height:34px; border-radius:10px; background:var(--accent); color:var(--accent-ink); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; font-family:'Plus Jakarta Sans',sans-serif; flex:none; }
+  .brand-text h1{ margin:0; font-size:16px; font-weight:700; letter-spacing:-0.01em; }
+  .brand-text p{ margin:0; font-size:12px; color:var(--ink-dim); }
+  .sync-pill{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-dim); padding:5px 10px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border); }
+  .sync-dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:none; }
+  .sync-dot.live{ background:var(--done); box-shadow:0 0 0 3px var(--done-bg); }
+  .identity-pill{ display:flex; align-items:center; gap:8px; font-size:12px; padding:5px 6px 5px 12px; border-radius:999px; background:var(--accent-soft); color:var(--accent-soft-ink); border:1px solid var(--done-border); }
+  .identity-pill button{ background:var(--surface); border:1px solid var(--border); color:var(--ink-dim); border-radius:999px; padding:3px 9px; cursor:pointer; font-size:11px; }
+
+  .tabs{ display:flex; gap:4px; background:var(--surface-2); padding:4px; border-radius:12px; max-width:480px; }
+  .tab-btn{ flex:1; border:none; background:transparent; padding:8px 10px; border-radius:9px; font-size:13px; font-weight:600; color:var(--ink-dim); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; }
+  .tab-btn.active{ background:var(--surface); color:var(--ink); box-shadow:var(--shadow-sm); }
+  .tab-badge{ min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--issue); color:#fff; font-size:10px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; }
+
+  main{ max-width:1080px; margin:0 auto; padding:18px 16px 40px; }
+  .section-head{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+  .section-head h2{ margin:0; font-size:19px; font-weight:700; }
+  .section-head .sub{ font-size:12.5px; color:var(--ink-dim); }
+  .eyebrow{ text-transform:uppercase; letter-spacing:0.08em; font-size:11px; font-weight:700; color:var(--accent); }
+
+  /* ---------- cards / grid ---------- */
+  .leader-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; }
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); overflow:hidden; }
+  .leader-card-head{ display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--border); gap:8px; }
+  .leader-name{ display:flex; align-items:center; gap:9px; }
+  .avatar{ width:30px; height:30px; border-radius:9px; background:var(--surface-2); color:var(--ink-dim); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; font-family:'Plus Jakarta Sans',sans-serif; flex:none; }
+  .leader-name strong{ font-size:14.5px; }
+  .frac-chip{ font-size:11.5px; font-weight:700; padding:4px 9px; border-radius:999px; background:var(--surface-2); color:var(--ink-dim); font-variant-numeric:tabular-nums; }
+  .frac-chip.all-done{ background:var(--done-bg); color:var(--done); }
+  .me-btn{ border:1px solid var(--accent); background:var(--surface); color:var(--accent); font-size:11.5px; font-weight:700; padding:5px 10px; border-radius:8px; cursor:pointer; white-space:nowrap; }
+  .me-btn:hover{ background:var(--accent-soft); }
+  .me-tag{ font-size:11.5px; font-weight:700; color:var(--accent); background:var(--accent-soft); padding:5px 10px; border-radius:8px; white-space:nowrap; }
+
+  .task-list{ display:flex; flex-direction:column; }
+  .task-row{ padding:13px 16px; border-bottom:1px solid var(--border); }
+  .task-row:last-child{ border-bottom:none; }
+  .task-top{ display:flex; align-items:flex-start; gap:10px; }
+  .chk{ width:19px; height:19px; margin-top:1px; accent-color:var(--accent); flex:none; cursor:pointer; }
+  .chk:disabled{ cursor:default; opacity:0.55; }
+  .task-info{ flex:1; min-width:0; }
+  .task-label-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .task-label{ font-size:13.5px; font-weight:600; color:var(--ink); }
+  .due-tag{ font-size:10.5px; font-weight:700; color:var(--ink-dim); background:var(--surface-2); padding:2px 7px; border-radius:999px; }
+  .overdue-tag{ font-size:10.5px; font-weight:700; color:var(--issue); background:var(--issue-bg); padding:2px 7px; border-radius:999px; }
+  .meta-row{ margin-top:4px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--ink-dim); }
+  .status-badge{ display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:999px; border:1px solid transparent; }
+  .status-badge.st-pending{ background:var(--pending-bg); color:var(--pending); border-color:var(--pending-border); }
+  .status-badge.st-done{ background:var(--done-bg); color:var(--done); border-color:var(--done-border); }
+  .status-badge.st-issue{ background:var(--issue-bg); color:var(--issue); border-color:var(--issue-border); }
+  .comment-view{ margin-top:5px; font-size:12.5px; color:var(--ink-dim); background:var(--surface-2); padding:7px 10px; border-radius:8px; }
+  .time-view{ font-size:11.5px; color:var(--ink-faint); }
+
+  .edit-panel{ margin-top:10px; padding:11px; background:var(--surface-2); border-radius:10px; display:flex; flex-direction:column; gap:9px; }
+  .status-choice{ display:flex; gap:8px; }
+  .status-opt{ flex:1; border:1px solid var(--border); background:var(--surface); border-radius:9px; padding:7px 6px; font-size:12px; font-weight:700; cursor:pointer; text-align:center; color:var(--ink-dim); }
+  .status-opt.sel-done{ border-color:var(--done); background:var(--done-bg); color:var(--done); }
+  .status-opt.sel-issue{ border-color:var(--issue); background:var(--issue-bg); color:var(--issue); }
+  textarea.comment-input{ width:100%; border:1px solid var(--border); border-radius:9px; padding:8px 10px; resize:vertical; min-height:54px; background:var(--surface); color:var(--ink); }
+  textarea.comment-input:focus, select:focus, input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  select.group-input{ width:100%; border:1px solid var(--border); border-radius:9px; padding:8px 10px; background:var(--surface); color:var(--ink); }
+  .req-star{ color:var(--issue); }
+  .field-label{ font-size:11.5px; font-weight:700; color:var(--ink-dim); }
+  .form-err{ font-size:11.5px; color:var(--issue); font-weight:600; }
+  .row-actions{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .btn-primary{ background:var(--accent); color:var(--accent-ink); border:none; padding:8px 16px; border-radius:9px; font-size:12.5px; font-weight:700; cursor:pointer; }
+  .btn-primary:hover{ opacity:0.92; }
+  .link-btn{ background:none; border:none; color:var(--ink-dim); font-size:11.5px; text-decoration:underline; cursor:pointer; padding:0; }
+
+  .empty-state{ padding:40px 20px; text-align:center; color:var(--ink-dim); font-size:13px; background:var(--surface); border:1px dashed var(--border); border-radius:var(--radius-lg); }
+  .empty-state .big{ font-size:26px; margin-bottom:6px; }
+
+  /* ---------- issues list ---------- */
+  .issue-item{ background:var(--surface); border:1px solid var(--issue-border); border-left:4px solid var(--issue); border-radius:var(--radius-md); padding:12px 14px; margin-bottom:10px; }
+  .issue-item .top{ display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:4px; }
+  .issue-item .who{ font-weight:700; font-size:13px; }
+  .issue-item .task{ font-size:12.5px; color:var(--ink-dim); }
+  .issue-item .comment{ font-size:13px; margin-top:4px; }
+  .issue-item .time{ font-size:11.5px; color:var(--ink-faint); margin-top:4px; }
+
+  /* ---------- table (admin live view) ---------- */
+  .table-wrap{ overflow-x:auto; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); }
+  table.live-table{ width:100%; border-collapse:collapse; font-size:12.5px; min-width:640px; }
+  table.live-table th{ text-align:left; padding:10px 12px; background:var(--surface-2); color:var(--ink-dim); font-weight:700; font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; border-bottom:1px solid var(--border); }
+  table.live-table td{ padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  table.live-table tr:last-child td{ border-bottom:none; }
+
+  /* ---------- admin ---------- */
+  .admin-gate{ max-width:340px; margin:60px auto; text-align:center; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:28px 22px; box-shadow:var(--shadow-md); }
+  .admin-gate .lock{ font-size:30px; margin-bottom:8px; }
+  .admin-gate input{ width:100%; border:1px solid var(--border); border-radius:9px; padding:10px 12px; margin:12px 0 8px; text-align:center; letter-spacing:0.1em; }
+  .stat-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; margin-bottom:20px; }
+  .stat-tile{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:12px 14px; }
+  .stat-tile .name{ font-size:12.5px; font-weight:700; color:var(--ink-dim); margin-bottom:4px; }
+  .stat-tile .val{ font-size:18px; font-weight:800; font-family:'Plus Jakarta Sans',sans-serif; }
+  .stat-tile .val.ok{ color:var(--done); }
+  .block{ margin-bottom:26px; }
+  .block h3{ font-size:14.5px; margin:0 0 10px; display:flex; align-items:center; gap:8px; }
+  .task-admin-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 14px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  .task-admin-row:last-child{ border-bottom:none; }
+  .task-admin-info{ display:flex; flex-direction:column; gap:3px; }
+  .task-admin-info .l1{ font-size:13px; font-weight:600; }
+  .task-admin-info .l2{ font-size:11.5px; color:var(--ink-dim); display:flex; gap:6px; flex-wrap:wrap; }
+  .tag{ background:var(--surface-2); padding:2px 7px; border-radius:999px; font-size:10.5px; font-weight:700; color:var(--ink-dim); }
+  .task-admin-actions{ display:flex; gap:6px; }
+  .icon-btn{ border:1px solid var(--border); background:var(--surface); color:var(--ink-dim); padding:6px 10px; border-radius:8px; font-size:11.5px; font-weight:700; cursor:pointer; }
+  .icon-btn:hover{ background:var(--surface-2); }
+  .icon-btn.danger{ color:var(--issue); border-color:var(--issue-border); }
+  .icon-btn.go{ color:var(--accent); border-color:var(--accent); }
+  .admin-form{ background:var(--surface-2); border-radius:10px; padding:12px; display:grid; grid-template-columns:1fr 1fr; gap:9px; margin:10px 0; }
+  .admin-form .full{ grid-column:1/-1; }
+  .admin-form label{ font-size:11px; font-weight:700; color:var(--ink-dim); display:block; margin-bottom:3px; }
+  .admin-form input[type=text], .admin-form input[type=time], .admin-form select{ width:100%; border:1px solid var(--border); border-radius:8px; padding:7px 9px; background:var(--surface); }
+  .admin-form .chk-row{ display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; }
+  .add-task-btn{ border:1px dashed var(--accent); background:var(--accent-soft); color:var(--accent-soft-ink); padding:9px 14px; border-radius:9px; font-size:12.5px; font-weight:700; cursor:pointer; width:100%; margin-top:8px; }
+
+  /* ---------- history ---------- */
+  .filter-bar{ display:flex; gap:8px; flex-wrap:wrap; align-items:end; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:12px 14px; margin-bottom:14px; }
+  .filter-field{ display:flex; flex-direction:column; gap:4px; }
+  .filter-field label{ font-size:10.5px; font-weight:700; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.03em; }
+  .filter-field select, .filter-field input{ border:1px solid var(--border); border-radius:8px; padding:7px 9px; background:var(--surface); min-width:120px; }
+  .day-nav{ display:flex; gap:4px; }
+  .day-nav button{ border:1px solid var(--border); background:var(--surface); border-radius:8px; padding:7px 10px; cursor:pointer; font-size:13px; }
+
+  [hidden]{ display:none !important; }
+  .footnote{ text-align:center; color:var(--ink-faint); font-size:11.5px; margin-top:28px; }
+  @media (max-width:520px){
+    .leader-grid{ grid-template-columns:1fr; }
+    .admin-form{ grid-template-columns:1fr; }
+    .tabs{ max-width:100%; }
+  }
+</style>
+</head>
+<body>
+<div class="gate-screen" id="gate">
+  <div class="gate-card">
+    <div class="gate-mark">✓</div>
+    <h1>Leader Checking</h1>
+    <p>Enter the access password to open this dashboard.</p>
+    <input type="password" id="gate-pass" placeholder="Access password" autocomplete="off">
+    <div class="form-err" id="gate-err"></div>
+    <button class="btn-primary" id="gate-btn" style="width:100%;margin-top:8px;">Unlock</button>
+  </div>
+</div>
+
+<div class="topbar" id="topbar" hidden>
+  <div class="topbar-inner">
+    <div class="brand-row">
+      <div class="brand">
+        <div class="brand-mark">✓</div>
+        <div class="brand-text">
+          <h1>Leader Checking</h1>
+          <p id="dateLabel">Today's Checking Dashboard</p>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div id="identityArea"></div>
+        <div class="sync-pill"><span class="sync-dot" id="syncDot"></span><span id="syncText">Connecting…</span></div>
+      </div>
+    </div>
+    <div class="tabs" id="tabs">
+      <button class="tab-btn" data-tab="today">Today</button>
+      <button class="tab-btn" data-tab="issues">Issues <span class="tab-badge" id="issueBadge" hidden>0</span></button>
+      <button class="tab-btn" data-tab="history">History</button>
+      <button class="tab-btn" data-tab="admin">Admin</button>
+    </div>
+  </div>
+</div>
+
+<main id="app" hidden>
+  <section id="view-today"></section>
+  <section id="view-issues" hidden></section>
+  <section id="view-history" hidden></section>
+  <section id="view-admin" hidden></section>
+</main>
+
+<script>
+(function(){
+  "use strict";
+
+  var SITE_PASSWORD = "urklinikcsc";
+  var ADMIN_PASSWORD = "marcom2026";
+
+  var FIREBASE_CONFIG = {
+    apiKey: "AIzaSyAOaZCMraWND9SP3hcbwTXhp8UQXutg_YY",
+    authDomain: "marcomchecking.firebaseapp.com",
+    projectId: "marcomchecking",
+    storageBucket: "marcomchecking.firebasestorage.app",
+    messagingSenderId: "285659148514",
+    appId: "1:285659148514:web:01008a8629ed82f0456ebb",
+    measurementId: "G-W1YVXVTMBE"
+  };
+
+  var DEFAULT_TASKS = [
+    { leader: "Ginghui", label: "Check lifecycle accuracy", schedule: "daily", dueTime: null, hasGroupPick: false, groupOptions: [] },
+    { leader: "Ginghui", label: "Check yesterday's leads call", schedule: "daily", dueTime: null, hasGroupPick: false, groupOptions: [] },
+    { leader: "Joanne", label: "Day 3&4 / Day 6&7 Follow-Up Checking", schedule: "daily", dueTime: null, hasGroupPick: true, groupOptions: ["Day 3 & 4", "Day 6 & 7"] },
+    { leader: "Irene", label: "Check URAP leads import & follow-up", schedule: "daily", dueTime: null, hasGroupPick: false, groupOptions: [] },
+    { leader: "Irene", label: "Check Daily Send Template > 300", schedule: "daily", dueTime: null, hasGroupPick: false, groupOptions: [] },
+    { leader: "Xinni", label: "Random check 100 SON Project leads", schedule: "daily", dueTime: null, hasGroupPick: false, groupOptions: [] },
+    { leader: "Yuting", label: "Tomorrow's appointment confirmation", schedule: "daily", dueTime: "16:00", hasGroupPick: false, groupOptions: [] },
+    { leader: "Yuting", label: "Thursday SON Project checking", schedule: "thursday", dueTime: null, hasGroupPick: false, groupOptions: [] }
+  ];
+  var seedAttempted = false;
+
+  var state = {
+    db: null,
+    ready: false,
+    tasks: [],
+    checksToday: {},
+    currentUser: null,
+    isAdmin: false,
+    activeTab: 'today',
+    drafts: {},
+    editingTaskId: null,
+    addingTask: false,
+    history: { date: todayStr(), leader: '', taskId: '', status: '', results: null, loading: false },
+    adminError: ''
+  };
+
+  try{ state.currentUser = sessionStorage.getItem('lc_user') || null; }catch(e){}
+
+  // ================= helpers =================
+  function pad(n){ return n < 10 ? '0' + n : '' + n; }
+  function todayStr(){
+    var d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  }
+  function isThursday(dateStr){
+    var d = dateStr ? parseDate(dateStr) : new Date();
+    return d.getDay() === 4;
+  }
+  function parseDate(dateStr){
+    var p = dateStr.split('-').map(Number);
+    return new Date(p[0], p[1]-1, p[2]);
+  }
+  function fmtTimeNow(){
+    var d = new Date();
+    var h = d.getHours(); var m = pad(d.getMinutes());
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12; if (h === 0) h = 12;
+    return h + ':' + m + ' ' + ampm;
+  }
+  function fmtDue(t){
+    if (!t) return '';
+    var parts = t.split(':'); var h = Number(parts[0]); var m = parts[1];
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    var hh = h % 12; if (hh === 0) hh = 12;
+    return hh + ':' + m + ' ' + ampm;
+  }
+  function fmtDateLabel(dateStr){
+    var d = parseDate(dateStr);
+    var wd = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    var mo = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return mo[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear() + ' · ' + wd[d.getDay()];
+  }
+  function isOverdueToday(task){
+    if (!task.dueTime) return false;
+    var now = new Date();
+    var parts = task.dueTime.split(':');
+    var due = new Date(); due.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+    return now.getTime() > due.getTime();
+  }
+  function esc(s){
+    if (s === undefined || s === null) return '';
+    return String(s).replace(/[&<>"']/g, function(c){
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+    });
+  }
+  function statusMeta(status){
+    if (status === 'completed') return {label:'Completed', cls:'st-done', icon:'✓'};
+    if (status === 'issue') return {label:'Issue Found', cls:'st-issue', icon:'⚠'};
+    return {label:'Pending', cls:'st-pending', icon:'⏳'};
+  }
+  function checkKey(dateStr, taskId){ return dateStr + '__' + taskId; }
+  function taskAppliesOn(task, dateStr){
+    if (task.schedule === 'thursday') return isThursday(dateStr);
+    return true;
+  }
+  function activeTasks(){ return state.tasks.filter(function(t){ return t.active !== false; }); }
+  function leadersList(){
+    var seen = {}; var out = [];
+    activeTasks().forEach(function(t){ if (!seen[t.leader]){ seen[t.leader]=true; out.push(t.leader); } });
+    return out;
+  }
+  function tasksForLeaderToday(leader){
+    return activeTasks().filter(function(t){ return t.leader === leader && taskAppliesOn(t, todayStr()); })
+      .sort(function(a,b){ return (a.order||0) - (b.order||0); });
+  }
+  function draftFor(taskId){
+    if (!state.drafts[taskId]){
+      var existing = state.checksToday[taskId];
+      state.drafts[taskId] = {
+        checked: !!(existing && existing.status !== 'pending'),
+        status: (existing && existing.status !== 'pending') ? existing.status : 'completed',
+        comment: (existing && existing.comment) || '',
+        group: (existing && existing.group) || ''
+      };
+    }
+    return state.drafts[taskId];
+  }
+
+  // ================= site gate =================
+  function unlockSite(){
+    document.getElementById('gate').hidden = true;
+    document.getElementById('topbar').hidden = false;
+    document.getElementById('app').hidden = false;
+    renderAll();
+    initDb();
+  }
+  function tryUnlock(){
+    var input = document.getElementById('gate-pass');
+    var val = input ? input.value : '';
+    if (val === SITE_PASSWORD){
+      try{ sessionStorage.setItem('lc_site_unlocked', '1'); }catch(e){}
+      unlockSite();
+    } else {
+      var err = document.getElementById('gate-err');
+      if (err) err.textContent = 'Incorrect password, please try again.';
+    }
+  }
+  (function initGate(){
+    var already = false;
+    try{ already = sessionStorage.getItem('lc_site_unlocked') === '1'; }catch(e){}
+    if (already){ unlockSite(); return; }
+    var btn = document.getElementById('gate-btn');
+    var input = document.getElementById('gate-pass');
+    if (btn) btn.addEventListener('click', tryUnlock);
+    if (input) input.addEventListener('keydown', function(e){ if (e.key === 'Enter') tryUnlock(); });
+    if (input) input.focus();
+  })();
+
+  // ================= db init =================
+  function maybeSeedTasks(){
+    if (seedAttempted || !state.db) return;
+    seedAttempted = true;
+    state.db.collection('tasks').get().then(function(snap){
+      if (!snap.empty) return;
+      var batch = state.db.batch();
+      DEFAULT_TASKS.forEach(function(t, i){
+        var ref = state.db.collection('tasks').doc();
+        var payload = {
+          leader: t.leader, label: t.label, schedule: t.schedule, dueTime: t.dueTime,
+          hasGroupPick: t.hasGroupPick, groupOptions: t.groupOptions,
+          active: true, order: (i + 1) * 1000
+        };
+        batch.set(ref, payload);
+      });
+      batch.commit().catch(function(){});
+    }).catch(function(){});
+  }
+  function initDb(){
+    if (typeof firebase === 'undefined'){ setSync(false, 'Could not load Firebase'); return; }
+    try{
+      if (!firebase.apps.length){ firebase.initializeApp(FIREBASE_CONFIG); }
+      state.db = firebase.firestore();
+    } catch(e){ setSync(false, 'Could not connect to the live database'); return; }
+    setSync(true, 'Live');
+    maybeSeedTasks();
+
+    state.db.collection('tasks').onSnapshot(function(snap){
+      var arr = [];
+      snap.docs.forEach(function(d){ var raw = d.data() || {}; var data = {}; for (var k in raw){ data[k] = raw[k]; } data.id = d.id; arr.push(data); });
+      state.tasks = arr;
+      renderAll();
+    }, function(err){ setSync(false, 'Sync interrupted'); });
+
+    state.db.collection('checks').where('date','==', todayStr()).onSnapshot(function(snap){
+      var map = {};
+      snap.docs.forEach(function(d){ var data = d.data(); map[data.taskId] = data; });
+      state.checksToday = map;
+      renderAll();
+    }, function(err){ setSync(false, 'Sync interrupted'); });
+  }
+  function setSync(ok, text){
+    var dot = document.getElementById('syncDot');
+    var t = document.getElementById('syncText');
+    if (dot) dot.className = 'sync-dot' + (ok ? ' live' : '');
+    if (t) t.textContent = text;
+  }
+
+  // ================= write helpers =================
+  function submitCheck(taskId){
+    var task = state.tasks.filter(function(t){ return t.id === taskId; })[0];
+    if (!task || !state.db) return;
+    var d = draftFor(taskId);
+    var errEl = document.getElementById('err-' + taskId);
+    if (errEl) errEl.textContent = '';
+    if (task.hasGroupPick && !d.group){
+      if (errEl) errEl.textContent = 'Please choose which group to check first';
+      return;
+    }
+    if (d.status === 'issue' && !d.comment.trim()){
+      if (errEl) errEl.textContent = 'A comment is required when reporting an issue';
+      return;
+    }
+    var payload = {
+      date: todayStr(), taskId: taskId, leader: task.leader, label: task.label,
+      status: d.status, comment: d.comment || '', group: task.hasGroupPick ? d.group : null,
+      checkedAtLabel: fmtTimeNow(), updatedAt: new Date().toISOString()
+    };
+    state.db.doc('checks/' + checkKey(todayStr(), taskId)).set(payload).catch(function(){});
+  }
+  function resetCheck(taskId){
+    var task = state.tasks.filter(function(t){ return t.id === taskId; })[0];
+    if (!task || !state.db) return;
+    delete state.drafts[taskId];
+    state.db.doc('checks/' + checkKey(todayStr(), taskId)).set({
+      date: todayStr(), taskId: taskId, leader: task.leader, label: task.label,
+      status: 'pending', comment: '', group: null, checkedAtLabel: '', updatedAt: new Date().toISOString()
+    }).catch(function(){});
+  }
+
+  // ================= render: nav =================
+  function renderNav(){
+    var tabs = document.getElementById('tabs');
+    Array.prototype.forEach.call(tabs.querySelectorAll('.tab-btn'), function(btn){
+      btn.classList.toggle('active', btn.getAttribute('data-tab') === state.activeTab);
+    });
+    var issueCount = 0;
+    Object.keys(state.checksToday).forEach(function(k){ if (state.checksToday[k].status === 'issue') issueCount++; });
+    var badge = document.getElementById('issueBadge');
+    if (issueCount > 0){ badge.hidden = false; badge.textContent = issueCount; } else { badge.hidden = true; }
+
+    document.getElementById('dateLabel').textContent = fmtDateLabel(todayStr());
+
+    var idWrap = document.getElementById('identityArea');
+    if (state.currentUser){
+      idWrap.innerHTML = '<div class="identity-pill">👤 Checking in as ' + esc(state.currentUser) + '<button data-action="clear-user">Switch</button></div>';
+    } else {
+      idWrap.innerHTML = '';
+    }
+
+    ['view-today','view-issues','view-history','view-admin'].forEach(function(id){
+      document.getElementById(id).hidden = (id !== 'view-' + state.activeTab);
+    });
+  }
+
+  // ================= render: today =================
+  function renderToday(){
+    var el = document.getElementById('view-today');
+    var leaders = leadersList();
+    if (leaders.length === 0){
+      el.innerHTML = '<div class="empty-state"><div class="big">📋</div>No checking tasks yet. Add one from the Admin tab.</div>';
+      return;
+    }
+    var html = '<div class="section-head"><div><span class="eyebrow">TODAY’S CHECKING</span><h2>Today’s Checking</h2></div><div class="sub">Tap your name to check in. Everyone else’s checklist is read-only.</div></div>';
+    html += '<div class="leader-grid">';
+    leaders.forEach(function(leader){
+      html += renderLeaderCard(leader);
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  function renderLeaderCard(leader){
+    var tasks = tasksForLeaderToday(leader);
+    var doneCount = 0;
+    tasks.forEach(function(t){ var c = state.checksToday[t.id]; if (c && c.status !== 'pending') doneCount++; });
+    var isMe = state.currentUser === leader;
+    var initials = leader.slice(0,1);
+    var html = '<div class="card">';
+    html += '<div class="leader-card-head">';
+    html += '<div class="leader-name"><div class="avatar">' + esc(initials) + '</div><strong>' + esc(leader) + '</strong></div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;">';
+    html += '<span class="frac-chip ' + (doneCount===tasks.length && tasks.length>0 ? 'all-done':'') + '">' + doneCount + '/' + tasks.length + ' Completed</span>';
+    if (isMe){
+      html += '<span class="me-tag">✓ You</span>';
+    } else {
+      html += '<button class="me-btn" data-action="set-user" data-leader="' + esc(leader) + '">This is me</button>';
+    }
+    html += '</div></div>';
+
+    html += '<div class="task-list">';
+    if (tasks.length === 0){
+      html += '<div class="task-row" style="color:var(--ink-faint);font-size:12.5px;">No checking scheduled today</div>';
+    } else {
+      tasks.forEach(function(task){ html += renderTaskRow(task, isMe); });
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function renderTaskRow(task, editable){
+    var check = state.checksToday[task.id];
+    var status = check ? check.status : 'pending';
+    var meta = statusMeta(status);
+    var overdue = status === 'pending' && isOverdueToday(task);
+    var html = '<div class="task-row">';
+    html += '<div class="task-top">';
+    html += '<input type="checkbox" class="chk" ' + (editable ? '' : 'disabled') + ' ' + (status !== 'pending' ? 'checked' : '') + ' data-action="toggle-check" data-task="' + task.id + '">';
+    html += '<div class="task-info">';
+    html += '<div class="task-label-row"><span class="task-label">' + esc(task.label) + '</span>';
+    if (task.dueTime) html += '<span class="' + (overdue?'overdue-tag':'due-tag') + '">' + (overdue?'⚠ Overdue · ':'⏰ Due ') + fmtDue(task.dueTime) + '</span>';
+    html += '</div>';
+
+    html += '<div class="meta-row"><span class="status-badge ' + meta.cls + '">' + meta.icon + ' ' + meta.label + '</span>';
+    if (check && check.group) html += '<span class="due-tag">' + esc(check.group) + '</span>';
+    if (check && check.checkedAtLabel) html += '<span class="time-view">Completed at: ' + esc(check.checkedAtLabel) + '</span>';
+    html += '</div>';
+    if (!editable && check && check.comment) html += '<div class="comment-view">💬 ' + esc(check.comment) + '</div>';
+
+    if (editable){
+      html += renderEditPanel(task, check);
+    }
+    html += '</div></div></div>';
+    return html;
+  }
+
+  function renderEditPanel(task, check){
+    var d = draftFor(task.id);
+    var status = check ? check.status : 'pending';
+    var html = '<div class="edit-panel">';
+    if (task.hasGroupPick){
+      html += '<div><div class="field-label">Which group are you checking today? <span class="req-star">*</span></div>';
+      html += '<select class="group-input" data-action="set-group" data-task="' + task.id + '"><option value="">Choose…</option>';
+      (task.groupOptions || []).forEach(function(g){
+        html += '<option value="' + esc(g) + '" ' + (d.group===g?'selected':'') + '>' + esc(g) + '</option>';
+      });
+      html += '</select></div>';
+    }
+    html += '<div><div class="field-label">Result</div><div class="status-choice">';
+    html += '<button type="button" class="status-opt ' + (d.status==='completed'?'sel-done':'') + '" data-action="set-status" data-task="' + task.id + '" data-status="completed">✓ Completed</button>';
+    html += '<button type="button" class="status-opt ' + (d.status==='issue'?'sel-issue':'') + '" data-action="set-status" data-task="' + task.id + '" data-status="issue">⚠ Issue Found</button>';
+    html += '</div></div>';
+    html += '<div><div class="field-label">Comment' + (d.status==='issue' ? ' <span class="req-star">*required</span>' : ' (optional)') + '</div>';
+    html += '<textarea class="comment-input" data-action="set-comment" data-task="' + task.id + '" placeholder="Describe what you found during checking…">' + esc(d.comment) + '</textarea></div>';
+    html += '<div class="form-err" id="err-' + task.id + '"></div>';
+    html += '<div class="row-actions"><span class="time-view">' + (check && check.checkedAtLabel ? 'Last submitted: ' + esc(check.checkedAtLabel) : 'Not submitted yet') + '</span><button class="btn-primary" data-action="submit-check" data-task="' + task.id + '">Submit</button></div>';
+    if (status !== 'pending'){
+      html += '<div><button class="link-btn" data-action="reset-check" data-task="' + task.id + '">Reset to pending</button></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // ================= render: issues =================
+  function collectIssues(){
+    var out = [];
+    Object.keys(state.checksToday).forEach(function(k){
+      var c = state.checksToday[k];
+      if (c.status === 'issue') out.push(c);
+    });
+    out.sort(function(a,b){ return (a.updatedAt||'') < (b.updatedAt||'') ? 1 : -1; });
+    return out;
+  }
+  function renderIssues(){
+    var el = document.getElementById('view-issues');
+    var issues = collectIssues();
+    var html = '<div class="section-head"><div><span class="eyebrow">ISSUES</span><h2>Issues Found Today</h2></div><div class="sub">' + issues.length + ' item(s)</div></div>';
+    if (issues.length === 0){
+      html += '<div class="empty-state"><div class="big">🎉</div>No issues found right now</div>';
+    } else {
+      issues.forEach(function(c){
+        html += '<div class="issue-item"><div class="top"><span class="who">' + esc(c.leader) + '</span><span class="time">' + esc(c.checkedAtLabel||'') + '</span></div>';
+        html += '<div class="task">' + esc(c.label) + (c.group ? ' (' + esc(c.group) + ')' : '') + '</div>';
+        html += '<div class="comment">💬 ' + esc(c.comment) + '</div></div>';
+      });
+    }
+    el.innerHTML = html;
+  }
+
+  // ================= render: history =================
+  function renderHistory(){
+    var el = document.getElementById('view-history');
+    var leaders = {}; state.tasks.forEach(function(t){ leaders[t.leader] = true; });
+    var html = '<div class="section-head"><div><span class="eyebrow">HISTORY</span><h2>History</h2></div><div class="sub">Pick a date to see that day’s checking</div></div>';
+    html += '<div class="filter-bar">';
+    html += '<div class="filter-field"><label>Date</label><input type="date" id="hist-date" value="' + state.history.date + '"></div>';
+    html += '<div class="day-nav"><button data-action="hist-prev-day">‹ Prev day</button><button data-action="hist-today">Today</button><button data-action="hist-next-day">Next day ›</button></div>';
+    html += '<div class="filter-field"><label>Leader</label><select id="hist-leader"><option value="">All</option>';
+    Object.keys(leaders).forEach(function(l){ html += '<option value="' + esc(l) + '" ' + (state.history.leader===l?'selected':'') + '>' + esc(l) + '</option>'; });
+    html += '</select></div>';
+    html += '<div class="filter-field"><label>Status</label><select id="hist-status">';
+    ['', 'pending','completed','issue'].forEach(function(s){
+      var lb = s===''?'All':statusMeta(s).label;
+      html += '<option value="' + s + '" ' + (state.history.status===s?'selected':'') + '>' + lb + '</option>';
+    });
+    html += '</select></div>';
+    html += '<button class="btn-primary" data-action="hist-search" style="align-self:end;">Search</button>';
+    html += '</div>';
+
+    html += '<div id="hist-results"></div>';
+    el.innerHTML = html;
+    renderHistoryResults();
+  }
+
+  function renderHistoryResults(){
+    var wrap = document.getElementById('hist-results');
+    if (!wrap) return;
+    if (state.history.loading){ wrap.innerHTML = '<div class="empty-state">Loading…</div>'; return; }
+    var rows = state.history.results;
+    if (rows === null){ wrap.innerHTML = '<div class="empty-state">Choose your filters, then click “Search” to see that date’s records.</div>'; return; }
+    var filtered = rows.filter(function(r){
+      if (state.history.leader && r.leader !== state.history.leader) return false;
+      if (state.history.status && r.status !== state.history.status) return false;
+      return true;
+    });
+    if (filtered.length === 0){ wrap.innerHTML = '<div class="empty-state"><div class="big">🗂️</div>No records match these filters for ' + fmtDateLabel(state.history.date) + '</div>'; return; }
+    filtered.sort(function(a,b){ return a.leader.localeCompare(b.leader); });
+    var html = '<div class="table-wrap"><table class="live-table"><thead><tr><th>Leader</th><th>Checking</th><th>Status</th><th>Comment</th><th>Completed At</th></tr></thead><tbody>';
+    filtered.forEach(function(r){
+      var meta = statusMeta(r.status);
+      html += '<tr><td>' + esc(r.leader) + '</td><td>' + esc(r.label) + (r.group?' ('+esc(r.group)+')':'') + '</td>';
+      html += '<td><span class="status-badge ' + meta.cls + '">' + meta.icon + ' ' + meta.label + '</span></td>';
+      html += '<td>' + esc(r.comment || '-') + '</td><td class="num">' + esc(r.checkedAtLabel || '-') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    wrap.innerHTML = html;
+  }
+
+  function runHistorySearch(){
+    if (!state.db) return;
+    state.history.loading = true; renderHistoryResults();
+    state.db.collection('checks').where('date','==', state.history.date).get().then(function(snap){
+      var arr = snap.docs.map(function(d){ return d.data(); });
+      state.history.results = arr;
+      state.history.loading = false;
+      renderHistoryResults();
+    }).catch(function(){
+      state.history.loading = false;
+      state.history.results = [];
+      renderHistoryResults();
+    });
+  }
+
+  // ================= render: admin =================
+  function renderAdmin(){
+    var el = document.getElementById('view-admin');
+    if (!state.isAdmin){
+      el.innerHTML = '<div class="admin-gate"><div class="lock">🔒</div><h3 style="margin:0;">Admin Mode</h3><p style="color:var(--ink-dim);font-size:12.5px;">Enter the admin password to view and edit all checking tasks</p>' +
+        '<input type="password" id="admin-pass" placeholder="Enter password">' +
+        '<div class="form-err" id="admin-err">' + esc(state.adminError) + '</div>' +
+        '<button class="btn-primary" style="width:100%;margin-top:6px;" data-action="admin-try">Enter Admin Mode</button></div>';
+      return;
+    }
+    var leaders = leadersList();
+    var html = '<div class="section-head"><div><span class="eyebrow">ADMIN</span><h2>Admin Mode</h2></div><button class="link-btn" data-action="admin-logout">Exit Admin Mode</button></div>';
+
+    html += '<div class="block"><h3>📊 Today’s Overview</h3><div class="stat-grid">';
+    leaders.forEach(function(leader){
+      var tasks = tasksForLeaderToday(leader);
+      var done = 0; tasks.forEach(function(t){ var c = state.checksToday[t.id]; if (c && c.status !== 'pending') done++; });
+      html += '<div class="stat-tile"><div class="name">' + esc(leader) + '</div><div class="val ' + (done===tasks.length && tasks.length>0?'ok':'') + ' num">' + done + ' / ' + tasks.length + ' Completed</div></div>';
+    });
+    html += '</div></div>';
+
+    html += '<div class="block"><h3>📡 Live Overview Table</h3>' + renderLiveTable() + '</div>';
+
+    var pending = [];
+    leaders.forEach(function(leader){
+      tasksForLeaderToday(leader).forEach(function(t){
+        var c = state.checksToday[t.id];
+        if (!c || c.status === 'pending') pending.push(t);
+      });
+    });
+    html += '<div class="block"><h3>⏳ Pending Checks (' + pending.length + ')</h3>';
+    if (pending.length === 0){ html += '<div class="empty-state">All of today’s checks are complete 🎉</div>'; }
+    else {
+      html += '<div class="card"><div class="task-list">';
+      pending.forEach(function(t){
+        html += '<div class="task-row"><div class="task-label-row"><span class="task-label">' + esc(t.leader) + ' · ' + esc(t.label) + '</span>' + (t.dueTime ? '<span class="due-tag">⏰ Due ' + fmtDue(t.dueTime) + '</span>' : '') + '</div></div>';
+      });
+      html += '</div></div>';
+    }
+    html += '</div>';
+
+    var issues = collectIssues();
+    html += '<div class="block"><h3>⚠ Issues Found (' + issues.length + ')</h3>';
+    if (issues.length === 0){ html += '<div class="empty-state">No issues found right now</div>'; }
+    else {
+      issues.forEach(function(c){
+        html += '<div class="issue-item"><div class="top"><span class="who">' + esc(c.leader) + '</span><span class="time">' + esc(c.checkedAtLabel||'') + '</span></div><div class="task">' + esc(c.label) + '</div><div class="comment">💬 ' + esc(c.comment) + '</div></div>';
+      });
+    }
+    html += '</div>';
+
+    html += '<div class="block"><h3>🗂️ History</h3><p class="sub" style="margin:0 0 8px;">Browse the full checking record for any date</p><button class="icon-btn go" data-action="goto-history">Go to History →</button></div>';
+
+    html += '<div class="block"><h3>🛠️ Manage Checking Tasks</h3><div class="card">';
+    activeTasks().sort(function(a,b){ return a.leader.localeCompare(b.leader) || (a.order||0)-(b.order||0); }).forEach(function(t){
+      html += renderAdminTaskRow(t);
+    });
+    if (state.tasks.filter(function(t){return t.active===false;}).length > 0){
+      html += '<div class="task-admin-row" style="background:var(--surface-2);"><div class="task-admin-info"><div class="l1">Deactivated tasks</div></div></div>';
+      state.tasks.filter(function(t){return t.active===false;}).forEach(function(t){
+        html += renderAdminTaskRow(t);
+      });
+    }
+    html += '</div>';
+    if (state.addingTask){ html += renderAddTaskForm(); }
+    else { html += '<button class="add-task-btn" data-action="admin-add-task-toggle">＋ Add Checking Task</button>'; }
+    html += '</div>';
+
+    el.innerHTML = html;
+  }
+
+  function renderLiveTable(){
+    var leaders = leadersList();
+    var rows = [];
+    leaders.forEach(function(leader){
+      tasksForLeaderToday(leader).forEach(function(t){ rows.push(t); });
+    });
+    if (rows.length === 0) return '<div class="empty-state">No checking tasks yet</div>';
+    var html = '<div class="table-wrap"><table class="live-table"><thead><tr><th>Leader</th><th>Checking</th><th>Status</th><th>Comment</th><th>Completed At</th></tr></thead><tbody>';
+    rows.forEach(function(t){
+      var c = state.checksToday[t.id];
+      var status = c ? c.status : 'pending';
+      var meta = statusMeta(status);
+      html += '<tr><td>' + esc(t.leader) + '</td><td>' + esc(t.label) + (c && c.group ? ' ('+esc(c.group)+')':'') + '</td>';
+      html += '<td><span class="status-badge ' + meta.cls + '">' + meta.icon + ' ' + meta.label + '</span></td>';
+      html += '<td>' + esc(c && c.comment ? c.comment : '-') + '</td><td class="num">' + esc(c && c.checkedAtLabel ? c.checkedAtLabel : '-') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  function scheduleTagText(t){ return t.schedule === 'thursday' ? 'Thursdays only' : 'Daily'; }
+
+  function renderAdminTaskRow(t){
+    if (state.editingTaskId === t.id){ return renderAdminTaskEditForm(t); }
+    var html = '<div class="task-admin-row">';
+    html += '<div class="task-admin-info"><div class="l1">' + esc(t.leader) + ' · ' + esc(t.label) + '</div>';
+    html += '<div class="l2"><span class="tag">' + scheduleTagText(t) + '</span>';
+    if (t.dueTime) html += '<span class="tag">Due ' + fmtDue(t.dueTime) + '</span>';
+    if (t.hasGroupPick) html += '<span class="tag">Needs group pick</span>';
+    if (t.active === false) html += '<span class="tag">Deactivated</span>';
+    html += '</div></div>';
+    html += '<div class="task-admin-actions">';
+    html += '<button class="icon-btn" data-action="admin-edit-task" data-task="' + t.id + '">Edit</button>';
+    if (t.active === false){
+      html += '<button class="icon-btn go" data-action="admin-toggle-task" data-task="' + t.id + '" data-to="true">Restore</button>';
+    } else {
+      html += '<button class="icon-btn danger" data-action="admin-toggle-task" data-task="' + t.id + '" data-to="false">Deactivate</button>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function renderAdminTaskEditForm(t){
+    var html = '<div class="task-admin-row" style="display:block;">';
+    html += '<div class="admin-form">';
+    html += '<div><label>Leader</label><input type="text" id="ef-leader" value="' + esc(t.leader) + '"></div>';
+    html += '<div><label>Frequency</label><select id="ef-schedule"><option value="daily" ' + (t.schedule==='daily'?'selected':'') + '>Daily</option><option value="thursday" ' + (t.schedule==='thursday'?'selected':'') + '>Thursdays only</option></select></div>';
+    html += '<div class="full"><label>Checking Task Name</label><input type="text" id="ef-label" value="' + esc(t.label) + '"></div>';
+    html += '<div><label>Due Time (optional)</label><input type="time" id="ef-due" value="' + esc(t.dueTime||'') + '"></div>';
+    html += '<div class="chk-row full"><input type="checkbox" id="ef-grouppick" ' + (t.hasGroupPick?'checked':'') + '> Requires picking a group first (like Joanne’s task)</div>';
+    html += '<div class="full"><label>Group options (comma-separated, only used when checked above)</label><input type="text" id="ef-groupopts" value="' + esc((t.groupOptions||[]).join(', ')) + '"></div>';
+    html += '</div>';
+    html += '<div class="row-actions"><button class="link-btn" data-action="admin-cancel-edit">Cancel</button><button class="btn-primary" data-action="admin-save-task" data-task="' + t.id + '">Save</button></div>';
+    html += '</div>';
+    return html;
+  }
+
+  function renderAddTaskForm(){
+    var html = '<div class="admin-form" style="margin-top:10px;">';
+    html += '<div><label>Leader</label><input type="text" id="af-leader" placeholder="e.g. Ginghui"></div>';
+    html += '<div><label>Frequency</label><select id="af-schedule"><option value="daily">Daily</option><option value="thursday">Thursdays only</option></select></div>';
+    html += '<div class="full"><label>Checking Task Name</label><input type="text" id="af-label" placeholder="e.g. Check XX leads"></div>';
+    html += '<div><label>Due Time (optional)</label><input type="time" id="af-due"></div>';
+    html += '<div class="chk-row full"><input type="checkbox" id="af-grouppick"> Requires picking a group first</div>';
+    html += '<div class="full"><label>Group options (comma-separated)</label><input type="text" id="af-groupopts" placeholder="e.g. Day 3 & 4, Day 6 & 7"></div>';
+    html += '</div>';
+    html += '<div class="row-actions"><button class="link-btn" data-action="admin-add-task-cancel">Cancel</button><button class="btn-primary" data-action="admin-add-task-submit">Add</button></div>';
+    return html;
+  }
+
+  // ================= admin actions =================
+  function saveTaskEdit(taskId){
+    var task = state.tasks.filter(function(t){ return t.id === taskId; })[0];
+    if (!task || !state.db) return;
+    var leader = document.getElementById('ef-leader').value.trim();
+    var label = document.getElementById('ef-label').value.trim();
+    var schedule = document.getElementById('ef-schedule').value;
+    var due = document.getElementById('ef-due').value;
+    var hasGroupPick = document.getElementById('ef-grouppick').checked;
+    var groupOpts = document.getElementById('ef-groupopts').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
+    if (!leader || !label) return;
+    state.db.doc('tasks/' + taskId).update({
+      leader: leader, label: label, schedule: schedule, dueTime: due || null,
+      hasGroupPick: hasGroupPick, groupOptions: hasGroupPick ? groupOpts : []
+    }).then(function(){ state.editingTaskId = null; renderAll(); }).catch(function(){});
+  }
+  function toggleTaskActive(taskId, toActive){
+    if (!state.db) return;
+    state.db.doc('tasks/' + taskId).update({ active: toActive === 'true' || toActive === true }).catch(function(){});
+  }
+  function addNewTask(){
+    if (!state.db) return;
+    var leader = document.getElementById('af-leader').value.trim();
+    var label = document.getElementById('af-label').value.trim();
+    var schedule = document.getElementById('af-schedule').value;
+    var due = document.getElementById('af-due').value;
+    var hasGroupPick = document.getElementById('af-grouppick').checked;
+    var groupOpts = document.getElementById('af-groupopts').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
+    if (!leader || !label) return;
+    state.db.collection('tasks').add({
+      leader: leader, label: label, schedule: schedule, dueTime: due || null,
+      hasGroupPick: hasGroupPick, groupOptions: hasGroupPick ? groupOpts : [],
+      active: true, order: Date.now()
+    }).then(function(){ state.addingTask = false; renderAll(); }).catch(function(){});
+  }
+
+  // ================= render all =================
+  function renderAll(){
+    renderNav();
+    renderToday();
+    renderIssues();
+    renderHistory();
+    renderAdmin();
+  }
+
+  // ================= events =================
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('[data-action]');
+    if (!t) return;
+    var action = t.getAttribute('data-action');
+    var taskId = t.getAttribute('data-task');
+
+    if (action === 'set-user'){
+      state.currentUser = t.getAttribute('data-leader');
+      try{ sessionStorage.setItem('lc_user', state.currentUser); }catch(err){}
+      renderAll();
+    } else if (action === 'clear-user'){
+      state.currentUser = null;
+      try{ sessionStorage.removeItem('lc_user'); }catch(err){}
+      renderAll();
+    } else if (action === 'toggle-check'){
+      var d = draftFor(taskId);
+      d.checked = !d.checked;
+      renderAll();
+    } else if (action === 'set-status'){
+      draftFor(taskId).status = t.getAttribute('data-status');
+      renderAll();
+    } else if (action === 'submit-check'){
+      submitCheck(taskId);
+    } else if (action === 'reset-check'){
+      resetCheck(taskId);
+    } else if (action === 'hist-search'){
+      var dEl = document.getElementById('hist-date');
+      var lEl = document.getElementById('hist-leader');
+      var sEl = document.getElementById('hist-status');
+      state.history.date = dEl.value || todayStr();
+      state.history.leader = lEl.value;
+      state.history.status = sEl.value;
+      runHistorySearch();
+    } else if (action === 'hist-prev-day' || action === 'hist-next-day' || action === 'hist-today'){
+      var cur = parseDate(state.history.date);
+      if (action === 'hist-prev-day') cur.setDate(cur.getDate()-1);
+      if (action === 'hist-next-day') cur.setDate(cur.getDate()+1);
+      if (action === 'hist-today') cur = new Date();
+      state.history.date = cur.getFullYear() + '-' + pad(cur.getMonth()+1) + '-' + pad(cur.getDate());
+      state.history.results = null;
+      renderHistory();
+    } else if (action === 'admin-try'){
+      var val = document.getElementById('admin-pass').value;
+      if (val === ADMIN_PASSWORD){ state.isAdmin = true; state.adminError = ''; }
+      else { state.adminError = 'Incorrect password, please try again.'; }
+      renderAll();
+    } else if (action === 'admin-logout'){
+      state.isAdmin = false; renderAll();
+    } else if (action === 'goto-history'){
+      state.activeTab = 'history'; renderAll();
+    } else if (action === 'admin-edit-task'){
+      state.editingTaskId = taskId; renderAdmin();
+    } else if (action === 'admin-cancel-edit'){
+      state.editingTaskId = null; renderAdmin();
+    } else if (action === 'admin-save-task'){
+      saveTaskEdit(taskId);
+    } else if (action === 'admin-toggle-task'){
+      toggleTaskActive(taskId, t.getAttribute('data-to'));
+    } else if (action === 'admin-add-task-toggle'){
+      state.addingTask = true; renderAdmin();
+    } else if (action === 'admin-add-task-cancel'){
+      state.addingTask = false; renderAdmin();
+    } else if (action === 'admin-add-task-submit'){
+      addNewTask();
+    }
+  });
+
+  document.addEventListener('change', function(e){
+    var t = e.target;
+    if (t.getAttribute && t.getAttribute('data-action') === 'set-group'){
+      draftFor(t.getAttribute('data-task')).group = t.value;
+      renderAll();
+    }
+  });
+
+  document.addEventListener('input', function(e){
+    var t = e.target;
+    if (t.getAttribute && t.getAttribute('data-action') === 'set-comment'){
+      draftFor(t.getAttribute('data-task')).comment = t.value;
+    }
+  });
+
+  document.getElementById('tabs').addEventListener('click', function(e){
+    var b = e.target.closest('.tab-btn');
+    if (!b) return;
+    state.activeTab = b.getAttribute('data-tab');
+    if (state.activeTab === 'history' && state.history.results === null && state.db){ runHistorySearch(); }
+    renderAll();
+  });
+
+  if (window.claude && window.claude.hot){
+    try{
+      window.claude.hot.snapshot(function(){ return { user: state.currentUser }; });
+      var boot = function(data){ if (data && data.user) state.currentUser = data.user; renderAll(); };
+      if (window.claude.hot.ready) window.claude.hot.ready(boot); else boot(window.claude.hot.data || {});
+    }catch(e){}
+  }
+})();
+</script>
+
+</body>
+</html>
