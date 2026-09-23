@@ -189,6 +189,15 @@
   .btn-primary:hover{ opacity:0.92; }
   .link-btn{ background:none; border:none; color:var(--ink-dim); font-size:11.5px; text-decoration:underline; cursor:pointer; padding:0; }
 
+  .shot-wrap{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .shot-thumb{ width:64px; height:64px; object-fit:cover; border-radius:8px; border:1px solid var(--border); cursor:zoom-in; display:block; }
+  .shot-btn{ border:1px dashed var(--border); background:var(--surface); color:var(--ink-dim); font-size:11.5px; font-weight:700; padding:8px 12px; border-radius:9px; cursor:pointer; display:inline-block; }
+  .shot-btn:hover{ background:var(--surface-2); }
+  .shot-remove{ background:none; border:none; color:var(--issue); font-size:11px; font-weight:700; cursor:pointer; padding:0; text-decoration:underline; }
+  .shot-view-row{ margin-top:6px; }
+  .lightbox-overlay{ position:fixed; inset:0; z-index:100; background:rgba(10,10,12,0.86); display:flex; align-items:center; justify-content:center; padding:24px; cursor:zoom-out; }
+  .lightbox-overlay img{ max-width:100%; max-height:100%; border-radius:8px; box-shadow:var(--shadow-md); }
+
   .empty-state{ padding:40px 20px; text-align:center; color:var(--ink-dim); font-size:13px; background:var(--surface); border:1px dashed var(--border); border-radius:var(--radius-lg); }
   .empty-state .big{ font-size:26px; margin-bottom:6px; }
 
@@ -252,8 +261,7 @@
     .tabs{ max-width:100%; }
   }
 </style>
-</head>
-<body>
+
 <div class="gate-screen" id="gate">
   <div class="gate-card">
     <div class="gate-mark">✓</div>
@@ -287,6 +295,11 @@
       <button class="tab-btn" data-tab="admin">Admin</button>
     </div>
   </div>
+</div>
+</head>
+<body>
+<div class="lightbox-overlay" id="lightbox" hidden data-action="close-lightbox">
+  <img id="lightbox-img" src="" alt="Screenshot">
 </div>
 
 <main id="app" hidden>
@@ -389,6 +402,34 @@
       return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
     });
   }
+  function compressImage(file, cb){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var img = new Image();
+      img.onload = function(){
+        function attempt(dim, q){
+          var scale = Math.min(1, dim / Math.max(img.width, img.height));
+          var cw = Math.max(1, Math.round(img.width * scale));
+          var ch = Math.max(1, Math.round(img.height * scale));
+          var canvas = document.createElement('canvas');
+          canvas.width = cw; canvas.height = ch;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, cw, ch);
+          var dataUrl = canvas.toDataURL('image/jpeg', q);
+          if (dataUrl.length > 700000 && (dim > 500 || q > 0.4)){
+            attempt(Math.max(500, dim - 200), Math.max(0.4, q - 0.15));
+          } else {
+            cb(dataUrl);
+          }
+        }
+        attempt(1100, 0.72);
+      };
+      img.onerror = function(){ cb(null); };
+      img.src = e.target.result;
+    };
+    reader.onerror = function(){ cb(null); };
+    reader.readAsDataURL(file);
+  }
   function statusMeta(status){
     if (status === 'completed') return {label:'Completed', cls:'st-done', icon:'✓'};
     if (status === 'issue') return {label:'Issue Found', cls:'st-issue', icon:'⚠'};
@@ -416,7 +457,8 @@
         checked: !!(existing && existing.status !== 'pending'),
         status: (existing && existing.status !== 'pending') ? existing.status : 'completed',
         comment: (existing && existing.comment) || '',
-        group: (existing && existing.group) || ''
+        group: (existing && existing.group) || '',
+        screenshot: (existing && existing.screenshot) || ''
       };
     }
     return state.drafts[taskId];
@@ -519,6 +561,7 @@
     var payload = {
       date: todayStr(), taskId: taskId, leader: task.leader, label: task.label,
       status: d.status, comment: d.comment || '', group: task.hasGroupPick ? d.group : null,
+      screenshot: d.screenshot || null,
       checkedAtLabel: fmtTimeNow(), updatedAt: new Date().toISOString()
     };
     state.db.doc('checks/' + checkKey(todayStr(), taskId)).set(payload).catch(function(){});
@@ -529,7 +572,7 @@
     delete state.drafts[taskId];
     state.db.doc('checks/' + checkKey(todayStr(), taskId)).set({
       date: todayStr(), taskId: taskId, leader: task.leader, label: task.label,
-      status: 'pending', comment: '', group: null, checkedAtLabel: '', updatedAt: new Date().toISOString()
+      status: 'pending', comment: '', group: null, screenshot: null, checkedAtLabel: '', updatedAt: new Date().toISOString()
     }).catch(function(){});
   }
 
@@ -621,6 +664,7 @@
     if (check && check.checkedAtLabel) html += '<span class="time-view">Completed at: ' + esc(check.checkedAtLabel) + '</span>';
     html += '</div>';
     if (!editable && check && check.comment) html += '<div class="comment-view">💬 ' + esc(check.comment) + '</div>';
+    if (!editable && check && check.screenshot) html += '<div class="shot-view-row"><img class="shot-thumb" src="' + check.screenshot + '" data-action="view-shot"></div>';
 
     if (editable){
       html += renderEditPanel(task, check);
@@ -647,6 +691,13 @@
     html += '</div></div>';
     html += '<div><div class="field-label">Comment' + (d.status==='issue' ? ' <span class="req-star">*required</span>' : ' (optional)') + '</div>';
     html += '<textarea class="comment-input" data-action="set-comment" data-task="' + task.id + '" placeholder="Describe what you found during checking…">' + esc(d.comment) + '</textarea></div>';
+    html += '<div><div class="field-label">Screenshot (optional)</div><div class="shot-wrap">';
+    if (d.screenshot){
+      html += '<img class="shot-thumb" src="' + d.screenshot + '" data-action="view-shot">';
+      html += '<button type="button" class="shot-remove" data-action="remove-shot" data-task="' + task.id + '">Remove</button>';
+    }
+    html += '<label class="shot-btn">' + (d.screenshot ? '🔄 Replace screenshot' : '📷 Add screenshot') + '<input type="file" accept="image/*" style="display:none;" data-action="pick-shot" data-task="' + task.id + '"></label>';
+    html += '</div></div>';
     html += '<div class="form-err" id="err-' + task.id + '"></div>';
     html += '<div class="row-actions"><span class="time-view">' + (check && check.checkedAtLabel ? 'Last submitted: ' + esc(check.checkedAtLabel) : 'Not submitted yet') + '</span><button class="btn-primary" data-action="submit-check" data-task="' + task.id + '">Submit</button></div>';
     if (status !== 'pending'){
@@ -676,7 +727,9 @@
       issues.forEach(function(c){
         html += '<div class="issue-item"><div class="top"><span class="who">' + esc(c.leader) + '</span><span class="time">' + esc(c.checkedAtLabel||'') + '</span></div>';
         html += '<div class="task">' + esc(c.label) + (c.group ? ' (' + esc(c.group) + ')' : '') + '</div>';
-        html += '<div class="comment">💬 ' + esc(c.comment) + '</div></div>';
+        html += '<div class="comment">💬 ' + esc(c.comment) + '</div>';
+        if (c.screenshot) html += '<div class="shot-view-row"><img class="shot-thumb" src="' + c.screenshot + '" data-action="view-shot"></div>';
+        html += '</div>';
       });
     }
     el.innerHTML = html;
@@ -720,12 +773,14 @@
     });
     if (filtered.length === 0){ wrap.innerHTML = '<div class="empty-state"><div class="big">🗂️</div>No records match these filters for ' + fmtDateLabel(state.history.date) + '</div>'; return; }
     filtered.sort(function(a,b){ return a.leader.localeCompare(b.leader); });
-    var html = '<div class="table-wrap"><table class="live-table"><thead><tr><th>Leader</th><th>Checking</th><th>Status</th><th>Comment</th><th>Completed At</th></tr></thead><tbody>';
+    var html = '<div class="table-wrap"><table class="live-table"><thead><tr><th>Leader</th><th>Checking</th><th>Status</th><th>Comment</th><th>Screenshot</th><th>Completed At</th></tr></thead><tbody>';
     filtered.forEach(function(r){
       var meta = statusMeta(r.status);
       html += '<tr><td>' + esc(r.leader) + '</td><td>' + esc(r.label) + (r.group?' ('+esc(r.group)+')':'') + '</td>';
       html += '<td><span class="status-badge ' + meta.cls + '">' + meta.icon + ' ' + meta.label + '</span></td>';
-      html += '<td>' + esc(r.comment || '-') + '</td><td class="num">' + esc(r.checkedAtLabel || '-') + '</td></tr>';
+      html += '<td>' + esc(r.comment || '-') + '</td>';
+      html += '<td>' + (r.screenshot ? '<img class="shot-thumb" style="width:40px;height:40px;" src="' + r.screenshot + '" data-action="view-shot">' : '-') + '</td>';
+      html += '<td class="num">' + esc(r.checkedAtLabel || '-') + '</td></tr>';
     });
     html += '</tbody></table></div>';
     wrap.innerHTML = html;
@@ -792,7 +847,9 @@
     if (issues.length === 0){ html += '<div class="empty-state">No issues found right now</div>'; }
     else {
       issues.forEach(function(c){
-        html += '<div class="issue-item"><div class="top"><span class="who">' + esc(c.leader) + '</span><span class="time">' + esc(c.checkedAtLabel||'') + '</span></div><div class="task">' + esc(c.label) + '</div><div class="comment">💬 ' + esc(c.comment) + '</div></div>';
+        html += '<div class="issue-item"><div class="top"><span class="who">' + esc(c.leader) + '</span><span class="time">' + esc(c.checkedAtLabel||'') + '</span></div><div class="task">' + esc(c.label) + '</div><div class="comment">💬 ' + esc(c.comment) + '</div>';
+        if (c.screenshot) html += '<div class="shot-view-row"><img class="shot-thumb" src="' + c.screenshot + '" data-action="view-shot"></div>';
+        html += '</div>';
       });
     }
     html += '</div>';
@@ -824,14 +881,16 @@
       tasksForLeaderToday(leader).forEach(function(t){ rows.push(t); });
     });
     if (rows.length === 0) return '<div class="empty-state">No checking tasks yet</div>';
-    var html = '<div class="table-wrap"><table class="live-table"><thead><tr><th>Leader</th><th>Checking</th><th>Status</th><th>Comment</th><th>Completed At</th></tr></thead><tbody>';
+    var html = '<div class="table-wrap"><table class="live-table"><thead><tr><th>Leader</th><th>Checking</th><th>Status</th><th>Comment</th><th>Screenshot</th><th>Completed At</th></tr></thead><tbody>';
     rows.forEach(function(t){
       var c = state.checksToday[t.id];
       var status = c ? c.status : 'pending';
       var meta = statusMeta(status);
       html += '<tr><td>' + esc(t.leader) + '</td><td>' + esc(t.label) + (c && c.group ? ' ('+esc(c.group)+')':'') + '</td>';
       html += '<td><span class="status-badge ' + meta.cls + '">' + meta.icon + ' ' + meta.label + '</span></td>';
-      html += '<td>' + esc(c && c.comment ? c.comment : '-') + '</td><td class="num">' + esc(c && c.checkedAtLabel ? c.checkedAtLabel : '-') + '</td></tr>';
+      html += '<td>' + esc(c && c.comment ? c.comment : '-') + '</td>';
+      html += '<td>' + (c && c.screenshot ? '<img class="shot-thumb" style="width:40px;height:40px;" src="' + c.screenshot + '" data-action="view-shot">' : '-') + '</td>';
+      html += '<td class="num">' + esc(c && c.checkedAtLabel ? c.checkedAtLabel : '-') + '</td></tr>';
     });
     html += '</tbody></table></div>';
     return html;
@@ -958,6 +1017,15 @@
       submitCheck(taskId);
     } else if (action === 'reset-check'){
       resetCheck(taskId);
+    } else if (action === 'remove-shot'){
+      draftFor(taskId).screenshot = '';
+      renderAll();
+    } else if (action === 'view-shot'){
+      var lbImg = document.getElementById('lightbox-img');
+      lbImg.src = t.getAttribute('src');
+      document.getElementById('lightbox').hidden = false;
+    } else if (action === 'close-lightbox'){
+      document.getElementById('lightbox').hidden = true;
     } else if (action === 'hist-search'){
       var dEl = document.getElementById('hist-date');
       var lEl = document.getElementById('hist-leader');
@@ -1005,6 +1073,15 @@
     if (t.getAttribute && t.getAttribute('data-action') === 'set-group'){
       draftFor(t.getAttribute('data-task')).group = t.value;
       renderAll();
+    }
+    if (t.getAttribute && t.getAttribute('data-action') === 'pick-shot'){
+      var shotTaskId = t.getAttribute('data-task');
+      var file = t.files && t.files[0];
+      if (file){
+        compressImage(file, function(dataUrl){
+          if (dataUrl){ draftFor(shotTaskId).screenshot = dataUrl; renderAll(); }
+        });
+      }
     }
   });
 
